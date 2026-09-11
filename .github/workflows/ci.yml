@@ -1,0 +1,176 @@
+# Fork-local CI. Lives only on the fork-ci branch; never goes upstream.
+#
+# Fork master stays a pristine mirror of upstream/master, so this workflow is
+# run by dispatch against any ref:
+#
+#   gh workflow run ci.yml --repo slmingol/captagent --ref fork-ci -f ref=<branch-or-sha>
+#
+# It builds the same four packages as build.yml, runs the HEP-over-TCP
+# reconnect runtime test against the Rocky 9 RPM, and on success publishes the
+# packages to a rolling pre-release tagged build-<ref> so the team can install
+# them before anything is submitted upstream. Each run moves the tag and
+# replaces the assets.
+#
+# Pushes to fork-ci itself also run it (self-test of this workflow).
+#
+# Sync: rebase fork-ci onto upstream/master, then push it with --force-with-lease.
+
+name: CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or SHA to build and test
+        required: true
+        default: master
+  push:
+    branches:
+      - fork-ci
+
+concurrency:
+  group: ci-${{ inputs.ref || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  BUILD_REF: ${{ inputs.ref || github.ref_name }}
+
+jobs:
+  build:
+    name: Build ${{ matrix.os_name }} package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.src.outputs.sha }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os_name: Debian 12
+            image: debian:bookworm
+            builder: pkg/debian/builder-debian12
+            artifact_pattern: "*.deb"
+            artifact_name: debian12-package
+          - os_name: Debian 13
+            image: debian:trixie
+            builder: pkg/debian/builder-debian13
+            artifact_pattern: "*.deb"
+            artifact_name: debian13-package
+          - os_name: Rocky Linux 8
+            image: rockylinux:8
+            builder: pkg/rocky/builder-rocky8
+            artifact_pattern: "*.rpm"
+            artifact_name: rocky8-package
+          - os_name: Rocky Linux 9
+            image: rockylinux:9
+            builder: pkg/rocky/builder-rocky9
+            artifact_pattern: "*.rpm"
+            artifact_name: rocky9-package
+
+    steps:
+      - name: Checkout source to build (${{ env.BUILD_REF }})
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BUILD_REF }}
+          path: captagent_build
+
+      - name: Record built commit
+        id: src
+        run: echo "sha=$(git -C captagent_build rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build package
+        run: |
+          chmod +x "${{ github.workspace }}/captagent_build/${{ matrix.builder }}/builder.sh"
+          docker run --rm \
+            -v "${{ github.workspace }}:/tmp/build" \
+            -v "${{ github.workspace }}/captagent_build/${{ matrix.builder }}:/scripts" \
+            --entrypoint=/scripts/builder.sh \
+            ${{ matrix.image }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: "${{ github.workspace }}/${{ matrix.artifact_pattern }}"
+
+  hep-tcp-reconnect:
+    name: Runtime test, HEP over TCP reconnect (Rocky 9)
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # The test script lives on fork-ci (this workflow's branch), not on the
+      # ref under test, so check out the workflow branch here.
+      - name: Checkout fork-ci (test scripts)
+        uses: actions/checkout@v4
+
+      - name: Download Rocky 9 package
+        uses: actions/download-artifact@v4
+        with:
+          name: rocky9-package
+          path: pkg-out
+
+      - name: Run reconnect test in rockylinux:9
+        run: |
+          chmod +x tests/runtime/hep-tcp-reconnect.sh
+          docker run --rm \
+            --cap-add=NET_RAW --cap-add=NET_ADMIN \
+            -v "${{ github.workspace }}/pkg-out:/tmp/build" \
+            -v "${{ github.workspace }}/tests/runtime:/tests" \
+            --entrypoint=/tests/hep-tcp-reconnect.sh \
+            rockylinux:9
+
+      - name: Upload captagent log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hep-tcp-reconnect-log
+          path: pkg-out/captagent-runtime.log
+          if-no-files-found: ignore
+
+  release:
+    name: Publish packages to fork pre-release
+    needs: [build, hep-tcp-reconnect]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout fork-ci
+        uses: actions/checkout@v4
+
+      - name: Download all packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*-package'
+          path: dist
+          merge-multiple: true
+
+      - name: Create or update rolling pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ needs.build.outputs.sha }}
+        run: |
+          set -euo pipefail
+          TAG="build-$(echo "$BUILD_REF" | tr '/' '-')"
+          TITLE="Build of $BUILD_REF"
+          NOTES="Automated fork build of $BUILD_REF at $SHA.
+          Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          Runtime test: HEP over TCP reconnect passed on Rocky 9.
+
+          Pre-release for team testing only; not an official captagent release."
+
+          # Point the tag at the commit that was built. The leading '+' in the
+          # refspec forces the update when the tag already exists.
+          git tag -f "$TAG" "$SHA"
+          git push origin "+refs/tags/$TAG:refs/tags/$TAG"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --prerelease --title "$TITLE" --notes "$NOTES"
+          else
+            gh release create "$TAG" --prerelease --title "$TITLE" --notes "$NOTES"
+          fi
+          ls -la dist
+          gh release upload "$TAG" dist/* --clobber
+          echo "Published: ${{ github.server_url }}/${{ github.repository }}/releases/tag/$TAG"
