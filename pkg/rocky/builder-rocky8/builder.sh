@@ -88,9 +88,9 @@ chmod +x ${TMP_CAPT}/etc/init.d/captagent
 # FPM CAPTAGENT
 fpm -s dir -t rpm -C ${TMP_CAPT} \
         --name ${PROJECT_NAME} --version ${CODE_VERSION} \
-        -p "captagent-${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_OS}.${OS}.x86_64.rpm" \
+        -p "captagent-${VERSION_MAJOR}.${VERSION_MINOR}-1.fix.libuv.${VERSION_OS}.${OS}.x86_64.rpm" \
         --config-files /usr/local/${PROJECT_NAME}/etc/${PROJECT_NAME} --config-files /etc/sysconfig/${PROJECT_NAME} \
-        --iteration 8 --depends ${DEPENDENCY} --description "${PROJECT_NAME} ${CODE_VERSION}" .
+        --iteration 1.fix.libuv --depends ${DEPENDENCY} --description "${PROJECT_NAME} ${CODE_VERSION}" .
 
 
 ls -alF *.rpm
