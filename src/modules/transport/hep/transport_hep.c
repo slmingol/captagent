@@ -858,7 +858,12 @@ int _handle_send_tcp_request(hep_connection_t *conn, unsigned char *message, siz
   write_req = malloc(sizeof(uv_write_t));
   write_req->data = message;
 
-  uv_write(write_req, conn->connect.handle, &buf, 1, on_send_tcp_request);
+  int r = uv_write(write_req, conn->connect.handle, &buf, 1, on_send_tcp_request);
+  if (r != 0) {
+      free(message);
+      free(write_req);
+      return r;
+  }
 
   return 0;
 }
@@ -885,7 +890,8 @@ int _handle_send_tcp_request(hep_connection_t *conn, unsigned char *message, siz
         result = _handle_send_udp_request(conn, request->message, request->len);
         break;
     case SEND_TCP_REQUEST:
-        if (conn->conn_state == STATE_CONNECTED && conn->connect.handle != NULL) {
+        if (conn->conn_state == STATE_CONNECTED && conn->connect.handle != NULL &&
+            !uv_is_closing((uv_handle_t *)conn->connect.handle)) {
             result = _handle_send_tcp_request(conn, request->message, request->len);
         } else {
             free(request->message);
