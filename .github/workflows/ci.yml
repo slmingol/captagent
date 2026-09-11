@@ -133,6 +133,7 @@ jobs:
   release:
     name: Publish packages to fork pre-release
     needs: [build, hep-tcp-reconnect]
+    if: env.BUILD_REF != 'fork-ci'
     runs-on: ubuntu-latest
     permissions:
       contents: write
