@@ -137,8 +137,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout fork-ci
+      # Check out the exact commit that was built so the tag can point at it
+      # (a checkout of fork-ci would not contain commits from the built ref).
+      - name: Checkout built commit
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build.outputs.sha }}
 
       - name: Download all packages
         uses: actions/download-artifact@v4
