@@ -133,7 +133,7 @@ jobs:
   release:
     name: Publish packages to fork pre-release
     needs: [build, hep-tcp-reconnect]
-    if: env.BUILD_REF != 'fork-ci'
+    if: ${{ (inputs.ref || github.ref_name) != 'fork-ci' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
