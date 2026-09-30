@@ -130,9 +130,43 @@ jobs:
           path: pkg-out/captagent-runtime.log
           if-no-files-found: ignore
 
+  hep-payload-size-limit:
+    name: Runtime test, HEP payload size limiting (Rocky 9)
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout fork-ci (test scripts)
+        uses: actions/checkout@v4
+
+      - name: Download Rocky 9 package
+        uses: actions/download-artifact@v4
+        with:
+          name: rocky9-package
+          path: pkg-out
+
+      - name: Run payload size limit test in rockylinux:9
+        run: |
+          chmod +x tests/runtime/hep-payload-size-limit.sh
+          docker run --rm \
+            --cap-add=NET_RAW --cap-add=NET_ADMIN \
+            -v "${{ github.workspace }}/pkg-out:/tmp/build" \
+            -v "${{ github.workspace }}/tests/runtime:/tests" \
+            --entrypoint=/tests/hep-payload-size-limit.sh \
+            rockylinux:9
+
+      - name: Upload captagent log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hep-payload-size-limit-log
+          path: pkg-out/captagent-payload-limit.log
+          if-no-files-found: ignore
+
   release:
     name: Publish packages to fork pre-release
-    needs: [build, hep-tcp-reconnect]
+    needs: [build, hep-tcp-reconnect, hep-payload-size-limit]
     if: ${{ (inputs.ref || github.ref_name) != 'fork-ci' }}
     runs-on: ubuntu-latest
     permissions:
