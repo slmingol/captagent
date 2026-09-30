@@ -25,6 +25,12 @@ gem install --no-document fpm -v 1.17.0 2>/dev/null || true
 
 DEPENDENCY="libpcap,libuv,json-c,expat,pcre"
 
+# Homebrew on Apple Silicon installs to /opt/homebrew; Intel uses /usr/local.
+BREW_PREFIX="$(brew --prefix)"
+export PKG_CONFIG_PATH="${BREW_PREFIX}/lib/pkgconfig:${BREW_PREFIX}/opt/expat/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+export LDFLAGS="-L${BREW_PREFIX}/lib"
+export CPPFLAGS="-I${BREW_PREFIX}/include"
+
 cd "${TMP_DIR}/captagent_build"
 
 # BUILD
