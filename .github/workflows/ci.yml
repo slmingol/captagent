@@ -94,6 +94,38 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: "${{ github.workspace }}/${{ matrix.artifact_pattern }}"
 
+  build-macos:
+    name: Build macOS package
+    runs-on: macos-latest
+    if: ${{ (inputs.ref || github.ref_name) != 'fork-ci' }}
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.src.outputs.sha }}
+    steps:
+      - name: Checkout source to build (${{ env.BUILD_REF }})
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BUILD_REF }}
+          path: captagent_build
+
+      - name: Record built commit
+        id: src
+        run: echo "sha=$(git -C captagent_build rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build package
+        run: |
+          export TMP_DIR="${{ github.workspace }}"
+          chmod +x "${{ github.workspace }}/captagent_build/pkg/macos/builder-macos/builder.sh"
+          cd "${{ github.workspace }}/captagent_build"
+          pkg/macos/builder-macos/builder.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-package
+          path: "${{ github.workspace }}/*.pkg"
+
   hep-tcp-reconnect:
     name: Runtime test, HEP over TCP reconnect (Rocky 9)
     needs: build
@@ -166,7 +198,7 @@ jobs:
 
   release:
     name: Publish packages to fork pre-release
-    needs: [build, hep-tcp-reconnect, hep-payload-size-limit]
+    needs: [build, build-macos, hep-tcp-reconnect, hep-payload-size-limit]
     if: ${{ (inputs.ref || github.ref_name) != 'fork-ci' }}
     runs-on: ubuntu-latest
     permissions:
