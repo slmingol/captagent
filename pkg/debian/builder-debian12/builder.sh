@@ -10,7 +10,8 @@ PROJECT_NAME="captagent"
 OS="bookworm"
 ARCH=$(dpkg --print-architecture)
 
-export CODE_VERSION="${VERSION_MAJOR}.${VERSION_MINOR}+combined1"
+BUILD_NUMBER="${BUILD_NUMBER:-1}"
+export CODE_VERSION="${VERSION_MAJOR}.${VERSION_MINOR}+combined${BUILD_NUMBER}"
 export TMP_DIR=/tmp/build
 
 apt-get -y update
@@ -73,7 +74,7 @@ chmod +x ${TMP_CAPT}/etc/init.d/captagent
 # FPM CAPTAGENT
 fpm -s dir -t deb -C ${TMP_CAPT} \
         --name ${PROJECT_NAME} --version ${CODE_VERSION} \
-        -p "captagent_${VERSION_MAJOR}.${VERSION_MINOR}+combined1.${OS}.${ARCH}.deb" \
+        -p "captagent_${VERSION_MAJOR}.${VERSION_MINOR}+combined${BUILD_NUMBER}.${OS}.${ARCH}.deb" \
         --config-files /usr/local/${PROJECT_NAME}/etc/${PROJECT_NAME} --config-files /etc/default/${PROJECT_NAME} \
         --iteration 1 --deb-no-default-config-files --depends ${DEPENDENCY} --description "${PROJECT_NAME} ${CODE_VERSION}" .
 
