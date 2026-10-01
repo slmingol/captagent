@@ -3,7 +3,7 @@ name: Build Packages
 on:
   workflow_dispatch:
   push:
-    branches: [master]
+    branches: [master, test/combined]
 
 jobs:
   build:
@@ -61,3 +61,40 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}
           path: "${{ github.workspace }}/${{ matrix.artifact_pattern }}"
+
+  build-macos:
+    name: Build macOS package
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          path: captagent_build
+
+      - name: Build package
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+          TMP_DIR: ${{ github.workspace }}
+        run: |
+          chmod +x "${{ github.workspace }}/captagent_build/pkg/macos/builder-macos/builder.sh"
+          "${{ github.workspace }}/captagent_build/pkg/macos/builder-macos/builder.sh"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-package
+          path: "${{ github.workspace }}/*.pkg"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete build-test-combined --repo ${{ github.repository }} --yes 2>/dev/null || true
+          gh release create build-test-combined \
+            --repo ${{ github.repository }} \
+            --title "Combined build #${{ github.run_number }}" \
+            --notes "Branch: ${{ github.ref_name }} | Commit: ${{ github.sha }} | Run: ${{ github.run_number }}" \
+            --prerelease \
+            ${{ github.workspace }}/*.pkg
