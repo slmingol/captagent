@@ -11,7 +11,7 @@ OS="rocky"
 VERSION_OS="el9"
 
 export CODE_VERSION="${VERSION_MAJOR}.${VERSION_MINOR}"
-ITERATION_SUFFIX="1.combined"
+ITERATION_SUFFIX="${BUILD_NUMBER:-1}.combined"
 export TMP_DIR=/tmp/build
 
 # pkgconfig

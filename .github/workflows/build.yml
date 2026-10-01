@@ -46,8 +46,11 @@ jobs:
         run: chmod +x "${{ github.workspace }}/captagent_build/${{ matrix.builder }}/builder.sh"
 
       - name: Build package
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
         run: |
           docker run --rm \
+            -e BUILD_NUMBER \
             -v "${{ github.workspace }}:/tmp/build" \
             -v "${{ github.workspace }}/captagent_build/${{ matrix.builder }}:/scripts" \
             --entrypoint=/scripts/builder.sh \

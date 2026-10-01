@@ -10,7 +10,7 @@ VERSION_MINOR="4"
 PROJECT_NAME="captagent"
 OS="macos"
 ARCH=$(uname -m)   # arm64 or x86_64
-ITERATION_SUFFIX="1.combined"
+ITERATION_SUFFIX="${BUILD_NUMBER:-1}.combined"
 
 export CODE_VERSION="${VERSION_MAJOR}.${VERSION_MINOR}"
 export TMP_DIR="${TMP_DIR:-/tmp/build}"
