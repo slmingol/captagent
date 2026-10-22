@@ -1,12 +1,19 @@
 /*
  * Unit tests for transport_erspan packet building logic.
  *
- * Tests exercise the pure functions extracted from the module:
+ * Tests exercise the pure functions mirrored from the module:
  *   - ip_checksum correctness
  *   - ERSPAN packet structure and sizes for Type I, II, III
  *   - GRE header fields (flags, proto) per version
+ *   - ERSPAN header field encoding (ver, session ID) per type
  *   - Inner frame field population from rcinfo
+ *   - Inner IP checksum validity in assembled packet
  *   - Oversized payload rejection
+ *   - session_id boundary values
+ *
+ * NOTE: build_test_packet() is a parallel implementation of build_erspan_packet()
+ * that shares struct definitions via _Static_assert size checks. To catch logic
+ * divergence, session_id encoding and checksum tests parse actual byte offsets.
  */
 
 #include <check.h>
@@ -42,11 +49,13 @@ typedef struct erspan_ii_hdr {
     uint32_t reserved_index;
 } __attribute__((packed)) erspan_ii_hdr_t;
 
+/* ERSPAN Type III header — 3 x 32-bit words per Cisco draft */
 typedef struct erspan_iii_hdr {
+    uint16_t ver_vlan;        /* ver[15:12]=0011, vlan[11:0] */
+    uint16_t cos_bso_t_sid;   /* cos[15:13], bso[12:11], T[10], session_id[9:0] */
     uint32_t timestamp;
     uint16_t sgt;
-    uint16_t ft_hw_d_gra_o;
-    uint32_t platspec;
+    uint16_t p_ft_hw_d_gra_o; /* p[15], ft[14:10], hw[9:6], d[5], gra[4:3], o[2:0] */
 } __attribute__((packed)) erspan_iii_hdr_t;
 
 typedef struct synth_eth_hdr {
@@ -75,6 +84,17 @@ typedef struct erspan_udp_hdr {
     uint16_t check;
 } __attribute__((packed)) erspan_udp_hdr_t;
 
+/* Guard against struct divergence from transport_erspan.h */
+_Static_assert(sizeof(gre_hdr_t)         == 4,  "gre_hdr_t size");
+_Static_assert(sizeof(erspan_ii_hdr_t)   == 8,  "erspan_ii_hdr_t size");
+_Static_assert(sizeof(erspan_iii_hdr_t)  == 12, "erspan_iii_hdr_t size");
+_Static_assert(sizeof(synth_eth_hdr_t)   == 14, "synth_eth_hdr_t size");
+_Static_assert(sizeof(erspan_ipv4_hdr_t) == 20, "erspan_ipv4_hdr_t size");
+_Static_assert(sizeof(erspan_udp_hdr_t)  == 8,  "erspan_udp_hdr_t size");
+
+_Static_assert(ERSPAN_II_HDR_SIZE  == sizeof(erspan_ii_hdr_t),  "ERSPAN_II_HDR_SIZE mismatch");
+_Static_assert(ERSPAN_III_HDR_SIZE == sizeof(erspan_iii_hdr_t), "ERSPAN_III_HDR_SIZE mismatch");
+
 /* ── ip_checksum (copy from transport_erspan.c for unit testing) ──────── */
 
 static uint16_t ip_checksum(void *buf, int len)
@@ -87,12 +107,12 @@ static uint16_t ip_checksum(void *buf, int len)
     return (uint16_t)(~sum);
 }
 
-/* ── minimal packet builder (mirrors transport_erspan.c logic) ─────────  */
+/* ── minimal packet builder (parallel to transport_erspan.c logic) ──────  */
 
 typedef struct {
-    uint8_t  erspan_version;
-    uint16_t session_id;
-    uint32_t seq_num;
+    uint8_t    erspan_version;
+    uint16_t   session_id;
+    uint32_t   seq_num;
     const char *capt_host;
     const char *src_host;
 } test_profile_t;
@@ -109,6 +129,8 @@ static int build_test_packet(test_profile_t *prof, test_rcinfo_t *rc,
                              uint8_t *out, size_t out_sz)
 {
     uint8_t version = prof->erspan_version;
+
+    if (payload_len > 65507) return -1;
 
     synth_eth_hdr_t eth;
     memset(&eth, 0, sizeof(eth));
@@ -143,7 +165,7 @@ static int build_test_packet(test_profile_t *prof, test_rcinfo_t *rc,
     gre.flags = (version == 1) ? 0 : htons(GRE_FLAGS_SEQ);
     gre.proto = gre_proto;
 
-    uint32_t seq = htonl(prof->seq_num);
+    uint32_t seq = (version != 1) ? htonl(prof->seq_num) : 0;
 
     erspan_ii_hdr_t  erspan2; memset(&erspan2,  0, sizeof(erspan2));
     erspan_iii_hdr_t erspan3; memset(&erspan3, 0, sizeof(erspan3));
@@ -152,7 +174,8 @@ static int build_test_packet(test_profile_t *prof, test_rcinfo_t *rc,
         erspan2.ver_vlan         = htons((uint16_t)((1 << 12) | 0));
         erspan2.cos_en_t_session = htons(sid);
     } else if (version == 3) {
-        erspan3.ft_hw_d_gra_o = htons(sid);
+        erspan3.ver_vlan      = htons((uint16_t)((3 << 12) | 0)); /* ver=3, vlan=0 */
+        erspan3.cos_bso_t_sid = htons(sid);  /* session_id in bits [9:0] */
     }
 
     size_t gre_block_sz = sizeof(gre_hdr_t);
@@ -234,7 +257,6 @@ static const uint8_t sip_payload[] = "INVITE sip:bob@example.com SIP/2.0\r\n\r\n
 
 START_TEST(test_ip_checksum_zero_for_valid_header)
 {
-    /* A correctly computed header should verify to 0 */
     erspan_ipv4_hdr_t hdr;
     memset(&hdr, 0, sizeof(hdr));
     hdr.ver_ihl  = (4 << 4) | 5;
@@ -242,15 +264,14 @@ START_TEST(test_ip_checksum_zero_for_valid_header)
     hdr.protocol = GRE_PROTO;
     hdr.tot_len  = htons(100);
     hdr.check    = ip_checksum(&hdr, sizeof(hdr));
-    uint16_t verify = ip_checksum(&hdr, sizeof(hdr));
-    ck_assert_uint_eq(verify, 0);
+    ck_assert_uint_eq(ip_checksum(&hdr, sizeof(hdr)), 0);
 }
 END_TEST
 
 START_TEST(test_type_i_packet_size)
 {
     uint8_t buf[MAX_ERSPAN_PACKET];
-    test_profile_t p = make_prof(1);
+    test_profile_t p  = make_prof(1);
     test_rcinfo_t  rc = make_rc();
     int len = build_test_packet(&p, &rc, sip_payload, sizeof(sip_payload)-1, buf, sizeof(buf));
     ck_assert_int_gt(len, 0);
@@ -261,7 +282,7 @@ END_TEST
 START_TEST(test_type_ii_packet_size)
 {
     uint8_t buf[MAX_ERSPAN_PACKET];
-    test_profile_t p = make_prof(2);
+    test_profile_t p  = make_prof(2);
     test_rcinfo_t  rc = make_rc();
     int len = build_test_packet(&p, &rc, sip_payload, sizeof(sip_payload)-1, buf, sizeof(buf));
     ck_assert_int_gt(len, 0);
@@ -272,7 +293,7 @@ END_TEST
 START_TEST(test_type_iii_packet_size)
 {
     uint8_t buf[MAX_ERSPAN_PACKET];
-    test_profile_t p = make_prof(3);
+    test_profile_t p  = make_prof(3);
     test_rcinfo_t  rc = make_rc();
     int len = build_test_packet(&p, &rc, sip_payload, sizeof(sip_payload)-1, buf, sizeof(buf));
     ck_assert_int_gt(len, 0);
@@ -283,21 +304,20 @@ END_TEST
 START_TEST(test_type_i_gre_proto)
 {
     uint8_t buf[MAX_ERSPAN_PACKET];
-    test_profile_t p = make_prof(1);
+    test_profile_t p  = make_prof(1);
     test_rcinfo_t  rc = make_rc();
     build_test_packet(&p, &rc, sip_payload, sizeof(sip_payload)-1, buf, sizeof(buf));
 
-    /* GRE header starts after outer IP (20 bytes) */
     gre_hdr_t *gre = (gre_hdr_t *)(buf + OUTER_IP_SZ);
     ck_assert_uint_eq(ntohs(gre->proto), ERSPAN_TYPE_I_PROTO);
-    ck_assert_uint_eq(gre->flags, 0);  /* Type I: no seq flag */
+    ck_assert_uint_eq(gre->flags, 0);
 }
 END_TEST
 
 START_TEST(test_type_ii_gre_proto_and_seq_flag)
 {
     uint8_t buf[MAX_ERSPAN_PACKET];
-    test_profile_t p = make_prof(2);
+    test_profile_t p  = make_prof(2);
     test_rcinfo_t  rc = make_rc();
     build_test_packet(&p, &rc, sip_payload, sizeof(sip_payload)-1, buf, sizeof(buf));
 
@@ -310,7 +330,7 @@ END_TEST
 START_TEST(test_type_iii_gre_proto)
 {
     uint8_t buf[MAX_ERSPAN_PACKET];
-    test_profile_t p = make_prof(3);
+    test_profile_t p  = make_prof(3);
     test_rcinfo_t  rc = make_rc();
     build_test_packet(&p, &rc, sip_payload, sizeof(sip_payload)-1, buf, sizeof(buf));
 
@@ -323,40 +343,130 @@ END_TEST
 START_TEST(test_type_ii_session_id)
 {
     uint8_t buf[MAX_ERSPAN_PACKET];
-    test_profile_t p = make_prof(2);
+    test_profile_t p  = make_prof(2);
     p.session_id = 99;
     test_rcinfo_t rc = make_rc();
     build_test_packet(&p, &rc, sip_payload, sizeof(sip_payload)-1, buf, sizeof(buf));
 
-    /* ERSPAN II header: after outer IP + GRE base + seq */
     size_t off = OUTER_IP_SZ + GRE_BASE_SZ + GRE_SEQ_SIZE;
     erspan_ii_hdr_t *e2 = (erspan_ii_hdr_t *)(buf + off);
     ck_assert_uint_eq(ntohs(e2->cos_en_t_session) & ERSPAN_MAX_SESSION_ID, 99);
 }
 END_TEST
 
+START_TEST(test_type_iii_session_id)
+{
+    uint8_t buf[MAX_ERSPAN_PACKET];
+    test_profile_t p  = make_prof(3);
+    p.session_id = 77;
+    test_rcinfo_t rc = make_rc();
+    build_test_packet(&p, &rc, sip_payload, sizeof(sip_payload)-1, buf, sizeof(buf));
+
+    /* ERSPAN III Word 0: after outer IP + GRE base + seq */
+    size_t off = OUTER_IP_SZ + GRE_BASE_SZ + GRE_SEQ_SIZE;
+    erspan_iii_hdr_t *e3 = (erspan_iii_hdr_t *)(buf + off);
+
+    /* ver field in bits [15:12] of ver_vlan must be 3 */
+    uint16_t ver_vlan = ntohs(e3->ver_vlan);
+    ck_assert_uint_eq(ver_vlan >> 12, 3);
+
+    /* session_id in bits [9:0] of cos_bso_t_sid */
+    uint16_t sid_field = ntohs(e3->cos_bso_t_sid);
+    ck_assert_uint_eq(sid_field & ERSPAN_MAX_SESSION_ID, 77);
+}
+END_TEST
+
+START_TEST(test_type_ii_session_id_zero)
+{
+    uint8_t buf[MAX_ERSPAN_PACKET];
+    test_profile_t p  = make_prof(2);
+    p.session_id = 0;
+    test_rcinfo_t rc = make_rc();
+    build_test_packet(&p, &rc, sip_payload, sizeof(sip_payload)-1, buf, sizeof(buf));
+
+    size_t off = OUTER_IP_SZ + GRE_BASE_SZ + GRE_SEQ_SIZE;
+    erspan_ii_hdr_t *e2 = (erspan_ii_hdr_t *)(buf + off);
+    ck_assert_uint_eq(ntohs(e2->cos_en_t_session) & ERSPAN_MAX_SESSION_ID, 0);
+}
+END_TEST
+
+START_TEST(test_type_ii_session_id_max)
+{
+    uint8_t buf[MAX_ERSPAN_PACKET];
+    test_profile_t p  = make_prof(2);
+    p.session_id = ERSPAN_MAX_SESSION_ID;  /* 1023 */
+    test_rcinfo_t rc = make_rc();
+    build_test_packet(&p, &rc, sip_payload, sizeof(sip_payload)-1, buf, sizeof(buf));
+
+    size_t off = OUTER_IP_SZ + GRE_BASE_SZ + GRE_SEQ_SIZE;
+    erspan_ii_hdr_t *e2 = (erspan_ii_hdr_t *)(buf + off);
+    ck_assert_uint_eq(ntohs(e2->cos_en_t_session) & ERSPAN_MAX_SESSION_ID, 1023);
+}
+END_TEST
+
+START_TEST(test_session_id_truncated_to_10_bits)
+{
+    /* session_id=1024 should truncate to 0 (1024 & 0x3FF == 0) */
+    uint8_t buf[MAX_ERSPAN_PACKET];
+    test_profile_t p  = make_prof(2);
+    p.session_id = 1024;
+    test_rcinfo_t rc = make_rc();
+    build_test_packet(&p, &rc, sip_payload, sizeof(sip_payload)-1, buf, sizeof(buf));
+
+    size_t off = OUTER_IP_SZ + GRE_BASE_SZ + GRE_SEQ_SIZE;
+    erspan_ii_hdr_t *e2 = (erspan_ii_hdr_t *)(buf + off);
+    ck_assert_uint_eq(ntohs(e2->cos_en_t_session) & ERSPAN_MAX_SESSION_ID, 0);
+}
+END_TEST
+
 START_TEST(test_outer_ip_protocol_is_gre)
 {
     uint8_t buf[MAX_ERSPAN_PACKET];
-    test_profile_t p = make_prof(2);
+    test_profile_t p  = make_prof(2);
     test_rcinfo_t  rc = make_rc();
     build_test_packet(&p, &rc, sip_payload, sizeof(sip_payload)-1, buf, sizeof(buf));
 
     erspan_ipv4_hdr_t *oip = (erspan_ipv4_hdr_t *)buf;
     ck_assert_uint_eq(oip->protocol, GRE_PROTO);
-    ck_assert_uint_eq((oip->ver_ihl >> 4), 4);   /* IPv4 */
-    ck_assert_uint_eq((oip->ver_ihl & 0x0f), 5); /* IHL=5 */
+    ck_assert_uint_eq((oip->ver_ihl >> 4), 4);
+    ck_assert_uint_eq((oip->ver_ihl & 0x0f), 5);
+}
+END_TEST
+
+START_TEST(test_outer_ip_checksum_valid)
+{
+    uint8_t buf[MAX_ERSPAN_PACKET];
+    test_profile_t p  = make_prof(2);
+    test_rcinfo_t  rc = make_rc();
+    build_test_packet(&p, &rc, sip_payload, sizeof(sip_payload)-1, buf, sizeof(buf));
+
+    /* Re-verifying the checksum over the assembled outer IP header must give 0 */
+    ck_assert_uint_eq(ip_checksum(buf, sizeof(erspan_ipv4_hdr_t)), 0);
+}
+END_TEST
+
+START_TEST(test_inner_ip_checksum_valid)
+{
+    uint8_t buf[MAX_ERSPAN_PACKET];
+    test_profile_t p  = make_prof(2);
+    test_rcinfo_t  rc = make_rc();
+    int total = build_test_packet(&p, &rc, sip_payload, sizeof(sip_payload)-1, buf, sizeof(buf));
+    ck_assert_int_gt(total, 0);
+
+    /* Inner IP header offset: outer IP + GRE block + ETH */
+    size_t gre_block = GRE_BASE_SZ + GRE_SEQ_SIZE + ERSPAN_II_HDR_SIZE;
+    size_t off = OUTER_IP_SZ + gre_block + ETH_HDR_SIZE;
+    ck_assert_uint_eq(ip_checksum(buf + off, sizeof(erspan_ipv4_hdr_t)), 0);
 }
 END_TEST
 
 START_TEST(test_inner_ip_src_dst_populated)
 {
     uint8_t buf[MAX_ERSPAN_PACKET];
-    test_profile_t p = make_prof(2);
+    test_profile_t p  = make_prof(2);
     test_rcinfo_t  rc = make_rc();
     build_test_packet(&p, &rc, sip_payload, sizeof(sip_payload)-1, buf, sizeof(buf));
 
-    /* Inner IP: after outer IP + GRE block + ETH */
     size_t gre_block = GRE_BASE_SZ + GRE_SEQ_SIZE + ERSPAN_II_HDR_SIZE;
     size_t off = OUTER_IP_SZ + gre_block + ETH_HDR_SIZE;
     erspan_ipv4_hdr_t *iip = (erspan_ipv4_hdr_t *)(buf + off);
@@ -372,7 +482,7 @@ END_TEST
 START_TEST(test_inner_udp_ports)
 {
     uint8_t buf[MAX_ERSPAN_PACKET];
-    test_profile_t p = make_prof(2);
+    test_profile_t p  = make_prof(2);
     test_rcinfo_t  rc = make_rc();
     rc.src_port = 12345;
     rc.dst_port = 5060;
@@ -388,9 +498,8 @@ END_TEST
 
 START_TEST(test_oversized_payload_rejected)
 {
-    /* Buffer too small — must return -1 */
-    uint8_t buf[64];  /* way too small for a full packet */
-    test_profile_t p = make_prof(2);
+    uint8_t buf[64];  /* too small for a full packet */
+    test_profile_t p  = make_prof(2);
     test_rcinfo_t  rc = make_rc();
     int len = build_test_packet(&p, &rc, sip_payload, sizeof(sip_payload)-1, buf, sizeof(buf));
     ck_assert_int_eq(len, -1);
@@ -400,14 +509,12 @@ END_TEST
 START_TEST(test_payload_present_at_end)
 {
     uint8_t buf[MAX_ERSPAN_PACKET];
-    test_profile_t p = make_prof(2);
+    test_profile_t p  = make_prof(2);
     test_rcinfo_t  rc = make_rc();
-    const uint8_t *payload = sip_payload;
     size_t plen = sizeof(sip_payload) - 1;
-    int total = build_test_packet(&p, &rc, payload, plen, buf, sizeof(buf));
+    int total = build_test_packet(&p, &rc, sip_payload, plen, buf, sizeof(buf));
     ck_assert_int_gt(total, 0);
-    /* Payload sits at end of packet */
-    ck_assert_mem_eq(buf + total - plen, payload, plen);
+    ck_assert_mem_eq(buf + total - plen, sip_payload, plen);
 }
 END_TEST
 
@@ -415,7 +522,7 @@ END_TEST
 
 Suite *erspan_suite(void)
 {
-    Suite *s = suite_create("transport_erspan");
+    Suite *s  = suite_create("transport_erspan");
     TCase *tc = tcase_create("packet_builder");
 
     tcase_add_test(tc, test_ip_checksum_zero_for_valid_header);
@@ -426,7 +533,13 @@ Suite *erspan_suite(void)
     tcase_add_test(tc, test_type_ii_gre_proto_and_seq_flag);
     tcase_add_test(tc, test_type_iii_gre_proto);
     tcase_add_test(tc, test_type_ii_session_id);
+    tcase_add_test(tc, test_type_iii_session_id);
+    tcase_add_test(tc, test_type_ii_session_id_zero);
+    tcase_add_test(tc, test_type_ii_session_id_max);
+    tcase_add_test(tc, test_session_id_truncated_to_10_bits);
     tcase_add_test(tc, test_outer_ip_protocol_is_gre);
+    tcase_add_test(tc, test_outer_ip_checksum_valid);
+    tcase_add_test(tc, test_inner_ip_checksum_valid);
     tcase_add_test(tc, test_inner_ip_src_dst_populated);
     tcase_add_test(tc, test_inner_udp_ports);
     tcase_add_test(tc, test_oversized_payload_rejected);

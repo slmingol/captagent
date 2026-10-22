@@ -57,12 +57,13 @@ typedef struct erspan_ii_hdr {
     uint32_t reserved_index; /* reserved[31:20], index[19:0] */
 } __attribute__((packed)) erspan_ii_hdr_t;
 
-/* ERSPAN Type III header (12 bytes) */
+/* ERSPAN Type III header (12 bytes — 3 x 32-bit words per Cisco draft) */
 typedef struct erspan_iii_hdr {
+    uint16_t ver_vlan;        /* ver[15:12]=0011, vlan[11:0] */
+    uint16_t cos_bso_t_sid;   /* cos[15:13], bso[12:11], T[10], session_id[9:0] */
     uint32_t timestamp;
     uint16_t sgt;
-    uint16_t ft_hw_d_gra_o; /* ft[15:11], hw[10:6], d[5], gra[4:3], o[2:0] */
-    uint32_t platspec;      /* platform specific */
+    uint16_t p_ft_hw_d_gra_o; /* p[15], ft[14:10], hw[9:6], d[5], gra[4:3], o[2:0] */
 } __attribute__((packed)) erspan_iii_hdr_t;
 
 /* Synthetic inner Ethernet header for non-pcap paths */

@@ -139,6 +139,13 @@ static int build_erspan_packet(unsigned int idx, msg_t *msg,
     if (rcinfo->src_ip) inet_pton(AF_INET, rcinfo->src_ip, &iip.saddr);
     if (rcinfo->dst_ip) inet_pton(AF_INET, rcinfo->dst_ip, &iip.daddr);
 
+    /* Payload must fit in a single inner IP datagram */
+    if (msg->len > 65507) {
+        LERR("transport_erspan[%s]: payload %zu > 65507 — dropping",
+             profile_erspan[idx].name, msg->len);
+        return -1;
+    }
+
     /* ---- synthetic inner UDP header (portable) ---- */
     erspan_udp_hdr_t iudp;
     memset(&iudp, 0, sizeof(iudp));
@@ -163,7 +170,10 @@ static int build_erspan_packet(unsigned int idx, msg_t *msg,
     gre.flags = (version == 1) ? 0 : htons(GRE_FLAGS_SEQ);
     gre.proto = gre_proto;
 
-    uint32_t seq = htonl(profile_erspan[idx].seq_num++);
+    /* Type I has no sequence field on the wire; only increment for II/III */
+    uint32_t seq = (version != 1)
+        ? htonl(__sync_fetch_and_add(&profile_erspan[idx].seq_num, 1))
+        : 0;
 
     /* ---- ERSPAN type-specific header ---- */
     erspan_ii_hdr_t  erspan2;
@@ -180,10 +190,11 @@ static int build_erspan_packet(unsigned int idx, msg_t *msg,
     } else if (version == 3) {
         struct timespec ts;
         clock_gettime(CLOCK_REALTIME, &ts);
+        erspan3.ver_vlan      = htons((uint16_t)((3 << 12) | 0)); /* ver=3, vlan=0 */
+        erspan3.cos_bso_t_sid = htons(sid);  /* session_id in bits [9:0] */
         erspan3.timestamp     = htonl((uint32_t)ts.tv_sec);
         erspan3.sgt           = 0;
-        erspan3.ft_hw_d_gra_o = htons(sid);
-        erspan3.platspec      = 0;
+        erspan3.p_ft_hw_d_gra_o = 0;
     }
 
     /* ---- calculate total size ---- */
@@ -244,9 +255,9 @@ static int send_erspan_packet(unsigned int idx, msg_t *msg)
 
     ssize_t sent = sendto(profile_erspan[idx].raw_fd, pkt, (size_t)len, 0,
                           (struct sockaddr *)&dst, sizeof(dst));
-    if (sent < 0) {
-        LERR("transport_erspan[%s]: sendto failed: %s",
-             profile_erspan[idx].name, strerror(errno));
+    if (sent < 0 || (size_t)sent != (size_t)len) {
+        LERR("transport_erspan[%s]: sendto failed (sent=%zd expected=%d): %s",
+             profile_erspan[idx].name, sent, len, strerror(errno));
         stats.errors_total++;
         return -1;
     }
@@ -336,6 +347,7 @@ static int load_module(xml_node *config)
     unsigned int i;
 
     LNOTICE("Loaded %s", module_name);
+    module_description = "GRE/ERSPAN (Type I/II/III) transport via raw socket";
 
     load_module_xml_config();
 
