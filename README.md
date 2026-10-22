@@ -77,7 +77,7 @@ If you have specific questions or require professional support please contact us
 
 ---
 
-### Bandwidth Fork Extensions
+### Fork Extensions
 
 This fork (`slmingol/captagent`) adds modules not present upstream.
 
