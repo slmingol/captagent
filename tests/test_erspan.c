@@ -498,10 +498,24 @@ END_TEST
 
 START_TEST(test_oversized_payload_rejected)
 {
-    uint8_t buf[64];  /* too small for a full packet */
+    uint8_t buf[64];  /* too small for a full packet — exercises pkt_total > out_sz path */
     test_profile_t p  = make_prof(2);
     test_rcinfo_t  rc = make_rc();
     int len = build_test_packet(&p, &rc, sip_payload, sizeof(sip_payload)-1, buf, sizeof(buf));
+    ck_assert_int_eq(len, -1);
+}
+END_TEST
+
+START_TEST(test_payload_too_large_for_datagram_rejected)
+{
+    /* 65454 bytes > 65453 limit — exercises the early payload_len guard,
+     * not the buffer-size guard; output buffer is large enough to not interfere */
+    uint8_t buf[MAX_ERSPAN_PACKET];
+    uint8_t big[65454];
+    memset(big, 0x41, sizeof(big));
+    test_profile_t p  = make_prof(2);
+    test_rcinfo_t  rc = make_rc();
+    int len = build_test_packet(&p, &rc, big, sizeof(big), buf, sizeof(buf));
     ck_assert_int_eq(len, -1);
 }
 END_TEST
@@ -543,6 +557,7 @@ Suite *erspan_suite(void)
     tcase_add_test(tc, test_inner_ip_src_dst_populated);
     tcase_add_test(tc, test_inner_udp_ports);
     tcase_add_test(tc, test_oversized_payload_rejected);
+    tcase_add_test(tc, test_payload_too_large_for_datagram_rejected);
     tcase_add_test(tc, test_payload_present_at_end);
 
     suite_add_tcase(s, tc);

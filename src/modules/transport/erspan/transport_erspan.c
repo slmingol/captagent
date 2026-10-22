@@ -463,6 +463,7 @@ static int unload_module(void)
         free(profile_erspan[i].capt_host);    profile_erspan[i].capt_host   = NULL;
         free(profile_erspan[i].src_host);     profile_erspan[i].src_host    = NULL;
     }
+    profile_size = 0;
     return 0;
 }
 
