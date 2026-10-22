@@ -139,9 +139,13 @@ static int build_erspan_packet(unsigned int idx, msg_t *msg,
     if (rcinfo->src_ip) inet_pton(AF_INET, rcinfo->src_ip, &iip.saddr);
     if (rcinfo->dst_ip) inet_pton(AF_INET, rcinfo->dst_ip, &iip.daddr);
 
-    /* Payload must fit in a single inner IP datagram */
-    if (msg->len > 65507) {
-        LERR("transport_erspan[%s]: payload %zu > 65507 — dropping",
+    /*
+     * Payload must fit in the assembled packet. Conservative bound is the
+     * Type III max: 65535 - 20(outer IP) - 4(GRE) - 4(seq) - 12(ERSPAN-III)
+     * - 14(eth) - 20(inner IP) - 8(inner UDP) = 65453. Safe for all types.
+     */
+    if (msg->len > 65453) {
+        LERR("transport_erspan[%s]: payload %zu > 65453 — dropping",
              profile_erspan[idx].name, msg->len);
         return -1;
     }
@@ -246,7 +250,7 @@ static int send_erspan_packet(unsigned int idx, msg_t *msg)
 {
     uint8_t pkt[MAX_ERSPAN_PACKET];
     int     len = build_erspan_packet(idx, msg, pkt, sizeof(pkt));
-    if (len < 0) { stats.errors_total++; return -1; }
+    if (len < 0) { __sync_fetch_and_add(&stats.errors_total, 1); return -1; }
 
     struct sockaddr_in dst;
     memset(&dst, 0, sizeof(dst));
@@ -258,11 +262,11 @@ static int send_erspan_packet(unsigned int idx, msg_t *msg)
     if (sent < 0 || (size_t)sent != (size_t)len) {
         LERR("transport_erspan[%s]: sendto failed (sent=%zd expected=%d): %s",
              profile_erspan[idx].name, sent, len, strerror(errno));
-        stats.errors_total++;
+        __sync_fetch_and_add(&stats.errors_total, 1);
         return -1;
     }
 
-    stats.send_packets_total++;
+    __sync_fetch_and_add(&stats.send_packets_total, 1);
     LDEBUG("transport_erspan[%s]: sent %zd bytes erspan-type=%u",
            profile_erspan[idx].name, sent, profile_erspan[idx].erspan_version);
     return 0;
@@ -275,7 +279,7 @@ int send_erspan(msg_t *msg)
     unsigned int i;
     if (!msg) return -1;
 
-    stats.received_packets_total++;
+    __sync_fetch_and_add(&stats.received_packets_total, 1);
 
     char *pname = msg->profile_name ? msg->profile_name : "erspan";
 
@@ -285,7 +289,7 @@ int send_erspan(msg_t *msg)
             return send_erspan_packet(i, msg);
     }
     LERR("transport_erspan: no enabled profile named '%s'", pname);
-    stats.errors_total++;
+    __sync_fetch_and_add(&stats.errors_total, 1);
     return -1;
 }
 
