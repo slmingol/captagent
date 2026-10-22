@@ -130,7 +130,7 @@ static int build_test_packet(test_profile_t *prof, test_rcinfo_t *rc,
 {
     uint8_t version = prof->erspan_version;
 
-    if (payload_len > 65507) return -1;
+    if (payload_len > 65453) return -1;  /* matches production bound */
 
     synth_eth_hdr_t eth;
     memset(&eth, 0, sizeof(eth));

@@ -58,6 +58,7 @@ static int unload_module(void);
 static int description(char *descr);
 static int statistic(char *buf, size_t len);
 static uint64_t serial_module(void);
+int reload_config(char *erbuf, int erlen);
 
 static cmd_export_t cmds[] = {
     { "transport_erspan_bind_api", (cmd_function)bind_usrloc,       1, 0, 0, 0 },
@@ -334,8 +335,9 @@ void free_module_xml_config(void)
 
 int reload_config(char *erbuf, int erlen)
 {
-    free_module_xml_config();
-    if (load_module_xml_config() < 0) {
+    /* Full reload: tear down existing profiles and re-parse from scratch */
+    unload_module();
+    if (load_module(NULL) < 0) {
         snprintf(erbuf, erlen, "transport_erspan: reload failed");
         return -1;
     }
@@ -353,7 +355,7 @@ static int load_module(xml_node *config)
     LNOTICE("Loaded %s", module_name);
     module_description = "GRE/ERSPAN (Type I/II/III) transport via raw socket";
 
-    load_module_xml_config();
+    if (load_module_xml_config() < 0) return -1;
 
     profile_size = 0;
     memset(&stats, 0, sizeof(stats));
