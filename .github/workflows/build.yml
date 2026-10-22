@@ -40,7 +40,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: captagent_build
 
@@ -56,7 +56,7 @@ jobs:
             ${{ matrix.image }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
           path: "${{ github.workspace }}/${{ matrix.artifact_pattern }}"
