@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<document type="captagent_module/xml">
+    <module name="transport_erspan" description="ERSPAN/GRE Transport" serial="2024010101">
+        <profile name="erspan" description="ERSPAN Transport" enable="true" serial="2024010101">
+            <settings>
+                <!-- Destination: Ativa probe IP -->
+                <param name="capture-host" value="192.0.2.1"/>
+                <!-- Source IP placed in outer GRE envelope (optional; defaults to kernel routing) -->
+                <!-- <param name="source-host" value="10.0.0.1"/> -->
+                <!--
+                    erspan-version:
+                      1 = GRE only (Type I, no ERSPAN header, proto 0x6558)
+                      2 = ERSPAN Type II (GRE + 8B ERSPAN header, proto 0x88BE)  [default]
+                      3 = ERSPAN Type III (GRE + 12B ERSPAN header, proto 0x22EB)
+                -->
+                <param name="erspan-version" value="2"/>
+                <!-- ERSPAN session ID 0-1023 (Type II/III only) -->
+                <param name="session-id" value="1"/>
+            </settings>
+        </profile>
+    </module>
+</document>
