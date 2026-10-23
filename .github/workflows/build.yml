@@ -102,9 +102,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     needs: build-macos
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/test/combined'
     permissions:
       contents: write
+    concurrency:
+      group: publish-release-${{ github.repository }}
+      cancel-in-progress: false
     steps:
       - name: Download macOS artifact
         uses: actions/download-artifact@v7
