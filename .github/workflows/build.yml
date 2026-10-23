@@ -7,10 +7,15 @@ on:
   pull_request:
     branches: [master]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build ${{ matrix.os_name }} package
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     permissions:
       contents: read
     strategy:
@@ -63,12 +68,14 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}
           path: "${{ github.workspace }}/${{ matrix.artifact_pattern }}"
+          if-no-files-found: error
 
   build-macos:
     name: Build macOS package
     runs-on: macos-latest
+    timeout-minutes: 30
     permissions:
-      contents: write
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -88,15 +95,31 @@ jobs:
         with:
           name: macos-package
           path: "${{ github.workspace }}/*.pkg"
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish prerelease
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs: build-macos
+    if: github.event_name == 'push'
+    permissions:
+      contents: write
+    steps:
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: macos-package
+          path: artifacts
 
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          gh release delete build-test-combined --repo ${{ github.repository }} --yes 2>/dev/null || true
+          gh release delete build-test-combined --yes 2>/dev/null || true
           gh release create build-test-combined \
-            --repo ${{ github.repository }} \
             --title "Combined build #${{ github.run_number }}" \
             --notes "Branch: ${{ github.ref_name }} | Commit: ${{ github.sha }} | Run: ${{ github.run_number }}" \
             --prerelease \
-            ${{ github.workspace }}/*.pkg
+            artifacts/*.pkg
