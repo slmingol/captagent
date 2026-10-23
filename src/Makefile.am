@@ -20,6 +20,7 @@ SUBDIRS = \
 	modules/protocol/ss7 \
 	modules/transport/hep \
 	modules/transport/json \
+	modules/transport/erspan \
 	modules/database/hash \
 	modules/database/redis \
 	modules/interface/http
