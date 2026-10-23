@@ -386,7 +386,7 @@ static int load_module(xml_node *config)
         }
 
         settings = xml_get("settings", profile, 1);
-        if (settings) {
+        if (settings && settings->child) {
             param = xml_get("param", settings->child, 1);
             while (param) {
                 key   = NULL;
@@ -412,7 +412,7 @@ static int load_module(xml_node *config)
                             (s >= 0 && s <= ERSPAN_MAX_SESSION_ID) ? (uint16_t)s : 1;
                     }
                 }
-                param = xml_get("param", param->next, 1);
+                param = param->next ? xml_get("param", param->next, 1) : NULL;
             }
         }
 
