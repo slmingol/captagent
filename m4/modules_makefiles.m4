@@ -18,6 +18,7 @@ AC_CONFIG_FILES([
 	src/modules/socket/tzsp/captureplan/Makefile
 	src/modules/transport/hep/Makefile
 	src/modules/transport/json/Makefile
+	src/modules/transport/erspan/Makefile
 	src/modules/interface/http/Makefile
 	src/modules/database/redis/Makefile
 	src/modules/database/hash/Makefile

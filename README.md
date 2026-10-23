@@ -111,6 +111,51 @@ If you have specific questions or require professional support please contact us
 ![HomerFlow](http://i.imgur.com/U7UBI.png)
 
 
+---
+
+### Fork Extensions
+
+This fork (`slmingol/captagent`) adds modules not present upstream.
+
+#### transport_erspan — GRE/ERSPAN Transport
+
+Sends captured SIP/RTP encapsulated in GRE or ERSPAN (Type I/II/III) via raw socket
+to a remote collector. Designed for deployments where the downstream probe (e.g. Ativa)
+handles IP-fragmented GRE/ERSPAN at the network layer but does not correctly reassemble
+TCP HEP streams or IP-fragmented UDP HEP datagrams.
+
+**When to use:** Ribbon SBC → capture host → Ativa probe, when HEP UDP fragmentation or
+TCP stream reassembly is unreliable end-to-end.
+
+**Config** (`conf/transport_erspan.xml`):
+
+```xml
+<profile name="erspan" description="ERSPAN Transport" enable="true">
+  <settings>
+    <param name="capture-host"   value="192.0.2.1"/>  <!-- Ativa probe IP -->
+    <!-- <param name="source-host" value="10.0.0.1"/> -->
+    <param name="erspan-version" value="2"/>           <!-- 1=GRE-only 2=Type II 3=Type III -->
+    <param name="session-id"     value="1"/>           <!-- 0-1023 -->
+  </settings>
+</profile>
+```
+
+Requires `CAP_NET_RAW` (Linux) or root (macOS) — same as pcap capture.
+
+**Module location:** `src/modules/transport/erspan/`
+
+#### max-hep-size — HEP Payload Limiting
+
+Truncates oversized HEP packets before transmission. Kept in this fork for deployments
+that need HEP payload size bounded to fit within a single MSS or MTU segment.
+
+```xml
+<param name="capture-proto" value="tcp"/>
+<param name="max-hep-size"  value="1400"/>
+```
+
+---
+
 ### Developers
 Contributions to our project are always welcome! If you intend to participate and help us improve CAPTAGENT, we kindly ask you to sign a [CLA (Contributor License Agreement)](http://cla.qxip.net) and coordinate at best with the existing team via the [homer-dev](http://groups.google.com/group/homer-dev) mailing list.
 
