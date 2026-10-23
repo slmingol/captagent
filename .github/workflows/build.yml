@@ -101,7 +101,7 @@ jobs:
     name: Publish prerelease
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    needs: build-macos
+    needs: [build, build-macos]
     if: github.event_name == 'push' && github.ref == 'refs/heads/test/combined'
     permissions:
       contents: write
@@ -109,6 +109,30 @@ jobs:
       group: publish-release-${{ github.repository }}
       cancel-in-progress: false
     steps:
+      - name: Download debian12 artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: debian12-package
+          path: artifacts
+
+      - name: Download debian13 artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: debian13-package
+          path: artifacts
+
+      - name: Download rocky8 artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: rocky8-package
+          path: artifacts
+
+      - name: Download rocky9 artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: rocky9-package
+          path: artifacts
+
       - name: Download macOS artifact
         uses: actions/download-artifact@v7
         with:
@@ -125,4 +149,4 @@ jobs:
             --title "Combined build #${{ github.run_number }}" \
             --notes "Branch: ${{ github.ref_name }} | Commit: ${{ github.sha }} | Run: ${{ github.run_number }}" \
             --prerelease \
-            artifacts/*.pkg
+            artifacts/*
