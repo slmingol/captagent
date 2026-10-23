@@ -387,31 +387,32 @@ static int load_module(xml_node *config)
 
         settings = xml_get("settings", profile, 1);
         if (settings) {
-            param = settings;
-            while ((param = xml_get("param", param, 1))) {
+            param = xml_get("param", settings->child, 1);
+            while (param) {
                 key   = NULL;
                 value = NULL;
                 for (i = 0; param->attr[i]; i += 2) {
                     if (!strcmp(param->attr[i], "name"))  key   = param->attr[i+1];
                     if (!strcmp(param->attr[i], "value")) value = param->attr[i+1];
                 }
-                if (!key || !value) continue;
-
-                if (!strcmp(key, "capture-host")) {
-                    profile_erspan[profile_size].capt_host = strdup(value);
-                } else if (!strcmp(key, "source-host")) {
-                    profile_erspan[profile_size].src_host = strdup(value);
-                } else if (!strcmp(key, "erspan-version")) {
-                    int v = atoi(value);
-                    if (v >= 1 && v <= 3)
-                        profile_erspan[profile_size].erspan_version = (uint8_t)v;
-                    else
-                        LWARNING("transport_erspan: invalid erspan-version '%s', defaulting to 2", value);
-                } else if (!strcmp(key, "session-id")) {
-                    int s = atoi(value);
-                    profile_erspan[profile_size].session_id =
-                        (s >= 0 && s <= ERSPAN_MAX_SESSION_ID) ? (uint16_t)s : 1;
+                if (key && value) {
+                    if (!strcmp(key, "capture-host")) {
+                        profile_erspan[profile_size].capt_host = strdup(value);
+                    } else if (!strcmp(key, "source-host")) {
+                        profile_erspan[profile_size].src_host = strdup(value);
+                    } else if (!strcmp(key, "erspan-version")) {
+                        int v = atoi(value);
+                        if (v >= 1 && v <= 3)
+                            profile_erspan[profile_size].erspan_version = (uint8_t)v;
+                        else
+                            LWARNING("transport_erspan: invalid erspan-version '%s', defaulting to 2", value);
+                    } else if (!strcmp(key, "session-id")) {
+                        int s = atoi(value);
+                        profile_erspan[profile_size].session_id =
+                            (s >= 0 && s <= ERSPAN_MAX_SESSION_ID) ? (uint16_t)s : 1;
+                    }
                 }
+                param = xml_get("param", param->next, 1);
             }
         }
 
@@ -435,6 +436,7 @@ static int load_module(xml_node *config)
                 profile_erspan[profile_size].capt_host);
 
         profile_size++;
+        profile = profile->next;
         continue;
 
 next_profile:
@@ -442,6 +444,7 @@ next_profile:
         free(profile_erspan[profile_size].description);
         free(profile_erspan[profile_size].capt_host);
         free(profile_erspan[profile_size].src_host);
+        profile = profile->next;
     }
 
     free_module_xml_config();
