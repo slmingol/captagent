@@ -1329,7 +1329,7 @@ static int load_module(xml_node *config) {
                     else if (!strncmp(key, "capture-port", 13)) profile_transport[profile_size].capt_port = strdup(value);
                     else if (!strncmp(key, "capture-proto", 14)) profile_transport[profile_size].capt_proto = strdup(value);
                     else if (!strncmp(key, "udp-bind-host", 10)) profile_transport[profile_size].udp_bind_host = strdup(value);
-                    else if (!strncmp(key, "udp-bind-port", 13)) profile_transport[profile_size].udp_bind_port = atoi(strdup(value));
+                    else if (!strncmp(key, "udp-bind-port", 13)) profile_transport[profile_size].udp_bind_port = atoi(value);
                     else if (!strncmp(key, "capture-password", 17)) profile_transport[profile_size].capt_password = strdup(value);
                     else if (!strncmp(key, "capture-id", 11)) profile_transport[profile_size].capt_id = atoi(value);
                     else if (!strncmp(key, "payload-compression", 19) && !strncmp(value, "true", 5)) profile_transport[profile_size].compression = 1;
@@ -1434,6 +1434,7 @@ static int unload_module(void)
 	LNOTICE("unloaded module transport_hep");
 
 	for (i = 0; i < profile_size; i++) {
+        homer_free(&hep_connection_s[i]);
         free_profile(i);
 	}
 
@@ -1486,6 +1487,12 @@ static int free_profile(unsigned int idx) {
 	if (profile_transport[idx].statistic_profile) {
         free(profile_transport[idx].statistic_profile);
         profile_transport[idx].statistic_profile = NULL;
+    }
+	/* default is a string literal; only free if it was strdup'd from config */
+	if (profile_transport[idx].udp_bind_host &&
+	    strcmp(profile_transport[idx].udp_bind_host, "0.0.0.0") != 0) {
+        free(profile_transport[idx].udp_bind_host);
+        profile_transport[idx].udp_bind_host = NULL;
     }
 
 	return 1;

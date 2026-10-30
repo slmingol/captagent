@@ -1716,6 +1716,8 @@ static int unload_module(void) {
   		    pcap_breakloop(sniffer_proto[i]);
   		    pthread_cancel(call_thread[i]);
   		    pthread_join(call_thread[i],NULL);
+  		    pcap_close(sniffer_proto[i]);
+  		    sniffer_proto[i] = NULL;
 		}
 
 		if (reasm[i] != NULL) {
@@ -1731,8 +1733,6 @@ static int unload_module(void) {
 
 		free_profile(i);
 	}
-	/* Close socket */
-	//pcap_close(sniffer_proto);
 	return 0;
 }
 
