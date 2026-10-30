@@ -283,6 +283,8 @@ xml_node *xml_node_str(char *str, int len) {
 xml_node *xml_get(const char *key, xml_node *ref, int recurs) {
 	xml_node *ret = NULL;
 
+	if (!ref) return NULL;
+
 	if (ref->key != NULL && !strcmp(ref->key, key)) {
 		return ref;
 	}
